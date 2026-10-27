@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Omascript
+GenericName=Screenplay Writer
+Comment=Write screenplays in Markdown with a live formatted preview
+Exec=omascript %f
+Icon=omascript
+Terminal=false
+Categories=Office;WordProcessor;TextEditor;
+MimeType=text/markdown;text/x-markdown;text/plain;
+Keywords=screenplay;script;screenwriting;markdown;fountain;film;tv;
+StartupWMClass=omascript

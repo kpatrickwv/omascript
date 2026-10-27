@@ -1,4 +1,5 @@
 #include "backend.h"
+#include "screenplay.h"
 
 #include <QClipboard>
 #include <QtConcurrent/QtConcurrentRun>
@@ -54,6 +55,7 @@ constexpr qreal textZoomSteps[] = {0.5, 0.67, 0.75, 0.9, 1.0, 1.1, 1.25, 1.5, 1.
 constexpr int textZoomStepCount = int(std::size(textZoomSteps));
 
 const QString editorFontSetting = QStringLiteral("editor/font");
+const QString previewVisibleSetting = QStringLiteral("screenplay/previewVisible");
 
 // Noto ships a separate family per script, which buries every other font in
 // the picker. Offer only the core Latin families; the rest still serve as
@@ -129,6 +131,7 @@ Backend::Backend(QObject *parent) : QObject(parent) {
                                                    textZoomSteps[textZoomStepCount - 1])
                                           : 1.0;
 
+    m_previewVisible = QSettings().value(previewVisibleSetting, true).toBool();
     const QString savedFont = QSettings().value(editorFontSetting).toString();
     m_editorFont = !savedFont.isEmpty() && QFontDatabase::hasFamily(savedFont)
         ? savedFont
@@ -437,6 +440,9 @@ void Backend::printDocument() {
     }
 
     QPrinter printer(QPrinter::HighResolution);
+    // The screenplay layout sets its own margins, so print to the paper edge.
+    printer.setFullPage(true);
+    printer.setPageSize(QPageSize(QPageSize::Letter));
     QPrintDialog dialog(&printer);
     dialog.setWindowTitle(QStringLiteral("Print %1").arg(fileName()));
     dialog.winId();
@@ -444,14 +450,60 @@ void Backend::printDocument() {
         dialog.windowHandle()->setTransientParent(m_parentWindow);
 
     if (dialog.exec() == QDialog::Accepted) {
-        QTextDocument rendered;
-        const QScreen *screen = m_parentWindow ? m_parentWindow->screen()
-                                               : QGuiApplication::primaryScreen();
-        rendered.setDefaultFont(printFont(m_document->defaultFont(),
-                                          screen ? screen->logicalDotsPerInchY() : 0.0));
-        rendered.setMarkdown(currentDocumentText());
-        rendered.print(&printer);
+        Screenplay::registerFonts();
+        if (!Screenplay::render(Screenplay::layout(currentDocumentText()), &printer))
+            setStatus(QStringLiteral("Could not print %1.").arg(fileName()));
     }
+}
+
+// Writes the formatted script next to the Markdown file, under the same name
+// with .pdf, replacing an earlier export. An unsaved document asks where.
+void Backend::exportPdf() {
+    if (!m_document) {
+        setStatus(QStringLiteral("There is no document to export."));
+        return;
+    }
+
+    if (m_fileUrl.isValid() && m_fileUrl.isLocalFile()) {
+        const QFileInfo info(m_fileUrl.toLocalFile());
+        exportPdfTo(QUrl::fromLocalFile(
+            info.dir().filePath(info.completeBaseName() + QStringLiteral(".pdf"))));
+        return;
+    }
+
+    QUrl suggested = suggestedSaveUrl();
+    QString path = suggested.toLocalFile();
+    const QFileInfo info(path);
+    path = info.dir().filePath(info.completeBaseName() + QStringLiteral(".pdf"));
+    emit pdfExportDialogRequested(QUrl::fromLocalFile(path));
+}
+
+void Backend::exportPdfTo(const QUrl &url) {
+    if (!url.isLocalFile()) {
+        setStatus(QStringLiteral("PDFs can only be exported to local files."));
+        return;
+    }
+
+    Screenplay::registerFonts();
+    const Screenplay::Layout layout = Screenplay::layout(currentDocumentText());
+    QString error;
+    const QString path = url.toLocalFile();
+    const QString name = QFileInfo(path).fileName();
+    if (!Screenplay::exportPdf(layout, path, &error)) {
+        setStatus(QStringLiteral("Could not export %1: %2").arg(name, error));
+        return;
+    }
+    const int pages = layout.pages.size();
+    setStatus(QStringLiteral("Exported %1 (%2 %3)")
+                  .arg(name).arg(pages).arg(pages == 1 ? QStringLiteral("page") : QStringLiteral("pages")));
+}
+
+void Backend::setPreviewVisible(bool visible) {
+    if (m_previewVisible == visible)
+        return;
+    m_previewVisible = visible;
+    QSettings().setValue(previewVisibleSetting, visible);
+    emit previewVisibleChanged();
 }
 
 void Backend::newWindow() {

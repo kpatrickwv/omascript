@@ -13,7 +13,7 @@ ApplicationWindow {
     minimumWidth: 720
     minimumHeight: 520
     visible: true
-    title: (backend.modified ? "* " : "") + backend.fileName + " - Omawrite"
+    title: (backend.modified ? "* " : "") + backend.fileName + " - Omascript"
 
     readonly property bool darkMode: backend.darkMode
     readonly property color pageColor: backend.themeBackground
@@ -30,10 +30,17 @@ ApplicationWindow {
     readonly property int footerHeight: scaledSize(32)
     // Never wider than the Flickable's viewport, whatever the floor asks for:
     // a tiling compositor can resize the window below its minimum width.
-    readonly property int editorWidth: Math.min(
-        Math.round(writerFontMetrics.averageCharacterWidth * 65),
-        Math.max(360, width - Math.round(writerFontMetrics.averageCharacterWidth * 20)),
-        Math.max(0, width - 48))
+    // The formatted script takes the right half of the window, and the
+    // writing column centres itself in what is left.
+    readonly property bool previewVisible: backend.previewVisible
+    readonly property int editorPaneWidth: previewVisible ? Math.round(width / 2) : width
+    readonly property int editorWidth: previewVisible
+        ? Math.min(Math.round(writerFontMetrics.averageCharacterWidth * 65),
+                   Math.max(0, editorPaneWidth - 64))
+        : Math.min(
+            Math.round(writerFontMetrics.averageCharacterWidth * 65),
+            Math.max(360, width - Math.round(writerFontMetrics.averageCharacterWidth * 20)),
+            Math.max(0, width - 48))
     property bool closeConfirmed: false
     property bool searchOpen: false
     property bool searchUpdating: false
@@ -266,6 +273,16 @@ ApplicationWindow {
     }
 
     Shortcut {
+        sequence: "Ctrl+E"
+        onActivated: backend.exportPdf()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Shift+P"
+        onActivated: backend.togglePreview()
+    }
+
+    Shortcut {
         sequences: ["Meta+F", "F11"]
         onActivated: toggleFullScreen()
     }
@@ -321,6 +338,11 @@ ApplicationWindow {
             win.pendingAction = "";
         }
 
+        function onPdfExportDialogRequested(suggestedUrl) {
+            pdfExportDialog.selectedFile = suggestedUrl;
+            pdfExportDialog.open();
+        }
+
         function onExternalChangeDetected(deleted, locallyModified) {
             externalChangeDialog.deleted = deleted;
             externalChangeDialog.locallyModified = locallyModified;
@@ -346,6 +368,15 @@ ApplicationWindow {
             win.awaitingPendingSave = false;
             win.pendingAction = "";
         }
+    }
+
+    Dialogs.FileDialog {
+        id: pdfExportDialog
+        title: "Export PDF"
+        fileMode: Dialogs.FileDialog.SaveFile
+        defaultSuffix: "pdf"
+        nameFilters: ["PDF files (*.pdf)"]
+        onAccepted: backend.exportPdfTo(selectedFile)
     }
 
     UnsavedChangesDialog {
@@ -407,7 +438,10 @@ ApplicationWindow {
         Flickable {
             id: editorFlick
             objectName: "editorScroll"
-            anchors.fill: parent
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.left: parent.left
+            width: win.editorPaneWidth - anchors.leftMargin - anchors.rightMargin
             anchors.leftMargin: 24
             anchors.rightMargin: 24
             // Inset the scrolling area by the footer strip at both ends, so
@@ -662,7 +696,10 @@ ApplicationWindow {
                     color: win.textColor
                 }
                 onCursorRectangleChanged: editorFlick.ensureCursorVisible()
-                onCursorPositionChanged: backend.setCaretPosition(cursorPosition)
+                onCursorPositionChanged: {
+                    backend.setCaretPosition(cursorPosition);
+                    screenplayPane.follow(cursorPosition);
+                }
                 onFontChanged: backend.documentFontChanged()
 
                 // One edit command, so a single undo takes the change back.
@@ -711,6 +748,22 @@ ApplicationWindow {
                     if (backend.insideFence(cursorPosition)) {
                         replaceSelectionWith("\n");
                         return;
+                    }
+                    // Screenplay flow: a character's name and a parenthetical
+                    // lead straight into the speech under them, with no blank
+                    // line between, and a transition is not a quote to carry on.
+                    var restOfLine = text.slice(cursorPosition, text.indexOf("\n", cursorPosition) < 0
+                                                ? text.length : text.indexOf("\n", cursorPosition));
+                    if (selectionStart === selectionEnd && /^\s*$/.test(restOfLine)) {
+                        if (/^\s*\*\*[^*]+?\*\*\s*(\([^)]*\))?\s*$/.test(line)
+                                || /^\s*[*_]?\(.*\)[*_]?\s*$/.test(line)) {
+                            replaceSelectionWith("\n");
+                            return;
+                        }
+                        if (/^\s*>/.test(line)) {
+                            replaceSelectionWith("\n\n");
+                            return;
+                        }
                     }
                     var match = line.match(/^(\s*)([-+*]|\d+[.)]|>+)\s+(.*)$/);
                     if (match) {
@@ -1050,6 +1103,34 @@ ApplicationWindow {
             }
         }
 
+        Rectangle {
+            objectName: "previewDivider"
+            visible: win.previewVisible
+            x: win.editorPaneWidth
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.topMargin: win.footerHeight
+            anchors.bottomMargin: win.footerHeight
+            width: 1
+            color: win.mutedColor
+            opacity: 0.35
+        }
+
+        ScreenplayPane {
+            id: screenplayPane
+            visible: win.previewVisible
+            x: win.editorPaneWidth + 1
+            width: win.width - x
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.topMargin: win.footerHeight
+            anchors.bottomMargin: win.footerHeight
+            text: editor.text
+            backgroundColor: win.pageColor
+            edgeColor: win.darkMode ? Qt.rgba(1, 1, 1, 0.12) : Qt.rgba(0, 0, 0, 0.18)
+            markerColor: backend.themeAccent
+        }
+
         Row {
             id: footerStatus
             anchors.left: parent.left
@@ -1082,6 +1163,22 @@ ApplicationWindow {
                 iconColor: win.mutedColor
                 tooltip: "Font"
                 onClicked: fontPicker.opened ? fontPicker.close() : fontPicker.open()
+            }
+
+            FooterIconButton {
+                objectName: "exportButton"
+                iconName: "export"
+                iconColor: win.mutedColor
+                tooltip: "Export PDF"
+                onClicked: backend.exportPdf()
+            }
+
+            FooterIconButton {
+                objectName: "previewButton"
+                iconName: "preview"
+                iconColor: win.mutedColor
+                tooltip: win.previewVisible ? "Hide Script Preview" : "Show Script Preview"
+                onClicked: backend.togglePreview()
             }
 
             Label {
@@ -1125,6 +1222,8 @@ ApplicationWindow {
             anchors.rightMargin: 12
             anchors.bottomMargin: 10
             text: backend.wordCount + (backend.wordCount === 1 ? " Word" : " Words")
+                  + " \u00b7 " + screenplayPane.pageCount
+                  + (screenplayPane.pageCount === 1 ? " Page" : " Pages")
             color: win.mutedColor
             opacity: 0.75
             font.family: "IBM Plex Mono"

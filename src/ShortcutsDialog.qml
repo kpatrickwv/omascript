@@ -13,13 +13,15 @@ Dialog {
     property real textScale: 1
     property int containerWidth: 1280
     property int containerHeight: 820
-    readonly property string versionText: "Omawrite " + Qt.application.version
+    readonly property string versionText: "Omascript " + Qt.application.version
     readonly property var shortcuts: [
         { key: "Ctrl+S", desc: "Save" },
         { key: "Ctrl+Shift+S", desc: "Save As" },
         { key: "Ctrl+O", desc: "Open" },
         { key: "Ctrl+N", desc: "New Window" },
-        { key: "Ctrl+P", desc: "Print" },
+        { key: "Ctrl+P", desc: "Print Script" },
+        { key: "Ctrl+E", desc: "Export PDF" },
+        { key: "Ctrl+Shift+P", desc: "Show/Hide Script Preview" },
         { key: "Ctrl+Z", desc: "Undo" },
         { key: "Ctrl+Shift+Z / Ctrl+Y", desc: "Redo" },
         { key: "F11 / Super+F", desc: "Fullscreen" },

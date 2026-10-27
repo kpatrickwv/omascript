@@ -54,6 +54,33 @@ Item {
                 context.lineTo(4.5, 9.5);
                 context.lineTo(11.5, 9.5);
                 context.lineTo(11.5, 13.5);
+            } else if (control.iconName === "export") {
+                // A page with its corner turned, and an arrow leaving it.
+                context.moveTo(9.5, 2.5);
+                context.lineTo(3.5, 2.5);
+                context.lineTo(3.5, 13.5);
+                context.lineTo(12.5, 13.5);
+                context.lineTo(12.5, 9.5);
+                context.moveTo(7.5, 8.5);
+                context.lineTo(13.5, 2.5);
+                context.moveTo(10, 2.5);
+                context.lineTo(13.5, 2.5);
+                context.lineTo(13.5, 6);
+            } else if (control.iconName === "preview") {
+                // Two panes side by side, lines of text in the right one.
+                context.moveTo(2.5, 2.5);
+                context.lineTo(13.5, 2.5);
+                context.lineTo(13.5, 13.5);
+                context.lineTo(2.5, 13.5);
+                context.closePath();
+                context.moveTo(8, 2.5);
+                context.lineTo(8, 13.5);
+                context.moveTo(9.75, 5.5);
+                context.lineTo(11.75, 5.5);
+                context.moveTo(9.75, 8);
+                context.lineTo(11.75, 8);
+                context.moveTo(9.75, 10.5);
+                context.lineTo(11.75, 10.5);
             } else if (control.iconName === "font") {
                 context.moveTo(3, 13.5);
                 context.lineTo(8, 2.5);

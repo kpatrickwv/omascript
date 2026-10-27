@@ -22,6 +22,8 @@
 
 #include "backend.h"
 #include "markdownhighlighter.h"
+#include "screenplay.h"
+#include "screenplaypreview.h"
 
 // Counts QML "Binding loop detected" warnings while it is alive, forwarding
 // everything to the previous handler so test output stays intact.
@@ -56,6 +58,7 @@ private slots:
         QStandardPaths::setTestModeEnabled(true);
         QVERIFY(m_settingsDirectory.isValid());
         QQuickStyle::setStyle(QStringLiteral("Material"));
+        qmlRegisterType<ScreenplayPreview>("Omascript", 1, 0, "ScreenplayPreview");
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
                            m_settingsDirectory.path());
@@ -156,9 +159,240 @@ private slots:
                  QStringLiteral("Already.md"));
     }
 
+    // ---------------------------------------------------------------------
+    // Screenplay formatting
+    // ---------------------------------------------------------------------
+    static QList<QPair<Screenplay::Kind, QString>> screenplayRows(const Screenplay::Page &page) {
+        QList<QPair<Screenplay::Kind, QString>> rows;
+        for (const Screenplay::Line &line : page.rows) {
+            if (line.kind != Screenplay::Kind::Blank)
+                rows.append({line.kind, line.text()});
+        }
+        return rows;
+    }
+
+    void formatsScreenplayElements() {
+        using namespace Screenplay;
+        const Layout result = layout(QStringLiteral(
+            "---\ntitle: Test Script\nauthor: [Ann, Bo]\ncontact: |\n  ann@example.com\n  555-0100\n---\n\n"
+            "<!-- never printed -->\n"
+            "## int. kitchen - night\n\n"
+            "Rain on the **window**. %%also hidden%%\n\n"
+            "**Margaret** (V.O.)\n*(quietly)*\nHello\nthere.\n\n"
+            "**TOM:** *(sotto)* Hi.\n\n"
+            "**BANG!**\n\n"
+            "\\INT. is a word here.\n\n"
+            "EXT. YARD - DAY\n\n"
+            "### angle on the door\n\n"
+            "> cut to:\n\n"
+            "SMASH CUT TO:\n\n"
+            "# the end\n"));
+
+        QCOMPARE(result.titlePage.title, QStringList{QStringLiteral("Test Script")});
+        QCOMPARE(result.titlePage.authors, (QStringList{QStringLiteral("Ann"), QStringLiteral("Bo")}));
+        QCOMPARE(result.titlePage.contact.size(), 2);
+        QCOMPARE(result.pages.size(), 1);
+
+        using Row = QPair<Kind, QString>;
+        const QList<Row> expected = {
+            {Kind::Scene, QStringLiteral("INT. KITCHEN - NIGHT")},
+            {Kind::Action, QStringLiteral("Rain on the window.")},
+            {Kind::Character, QStringLiteral("MARGARET (V.O.)")},
+            {Kind::Parenthetical, QStringLiteral("(quietly)")},
+            {Kind::Dialogue, QStringLiteral("Hello there.")},
+            {Kind::Character, QStringLiteral("TOM")},
+            {Kind::Parenthetical, QStringLiteral("(sotto)")},
+            {Kind::Dialogue, QStringLiteral("Hi.")},
+            {Kind::Action, QStringLiteral("BANG!")},
+            {Kind::Action, QStringLiteral("INT. is a word here.")},
+            {Kind::Scene, QStringLiteral("EXT. YARD - DAY")},
+            {Kind::Shot, QStringLiteral("ANGLE ON THE DOOR")},
+            {Kind::Transition, QStringLiteral("CUT TO:")},
+            {Kind::Transition, QStringLiteral("SMASH CUT TO:")},
+            {Kind::Centered, QStringLiteral("THE END")},
+        };
+        QCOMPARE(screenplayRows(result.pages.first()), expected);
+
+        // Bold survives into the formatted line; the markers do not.
+        const Line &action = result.pages.first().rows.at(2);
+        QCOMPARE(action.text(), QStringLiteral("Rain on the window."));
+        QVERIFY(action.chars.at(12).style & Bold);
+        QVERIFY(!(action.chars.at(0).style & Bold));
+    }
+
+    void splitsALongSpeechAcrossPages() {
+        using namespace Screenplay;
+        QString speech;
+        for (int i = 0; i < 80; ++i)
+            speech += QStringLiteral("Line number %1 of a speech. ").arg(i);
+        const Layout result = layout(QStringLiteral("## INT. ROOM - DAY\n\n**MARGARET**\n") + speech + "\n");
+        QVERIFY(result.pages.size() >= 2);
+
+        const auto first = screenplayRows(result.pages.at(0));
+        const auto second = screenplayRows(result.pages.at(1));
+        QCOMPARE(first.last(), qMakePair(Kind::More, QStringLiteral("(MORE)")));
+        QCOMPARE(second.first(), qMakePair(Kind::Character, QStringLiteral("MARGARET (CONT'D)")));
+        // The break lands at the end of a sentence.
+        QVERIFY(first.at(first.size() - 2).second.endsWith(QLatin1Char('.')));
+        QVERIFY(result.pages.at(0).rows.size() <= LinesPerPage);
+    }
+
+    void neverLeavesAHeadingOrTransitionStranded() {
+        using namespace Screenplay;
+        QString filler;
+        for (int i = 0; i < 26; ++i)
+            filler += QStringLiteral("Short action line number %1.\n\n").arg(i);
+        // 26 one-line actions fill 51 of the 54 lines: a heading and the
+        // first two lines of its scene would need 5 more.
+        const Layout headings = layout(filler + QStringLiteral("## INT. NEXT - DAY\n\nThe scene starts with a line\nthat runs long enough to wrap past one line on the page, and keeps going on.\n"));
+        QCOMPARE(headings.pages.size(), 2);
+        QCOMPARE(screenplayRows(headings.pages.at(0)).last().first, Kind::Action);
+        QCOMPARE(screenplayRows(headings.pages.at(1)).first().first, Kind::Scene);
+
+        QString nearlyFull;
+        for (int i = 0; i < 27; ++i)
+            nearlyFull += QStringLiteral("Action %1.\n\n").arg(i);
+        const Layout transitions = layout(nearlyFull + QStringLiteral("> CUT TO:\n"));
+        QCOMPARE(transitions.pages.size(), 2);
+        const auto second = screenplayRows(transitions.pages.last());
+        QCOMPARE(second.size(), 2);
+        QCOMPARE(second.last().first, Kind::Transition);
+        QCOMPARE(second.first().first, Kind::Action);
+    }
+
+    void readsScreenplayOptionsFromFrontMatter() {
+        using namespace Screenplay;
+        const QString body = QStringLiteral("## INT. A - DAY\n\n**TOM**\nOne.\n\nHe waits.\n\n**TOM**\nTwo.\n");
+        const Layout plain = layout(QStringLiteral("---\ntitle: X\n---\n") + body);
+        QCOMPARE(plain.pages.first().rows.first().sceneNumber, 0);
+        QVERIFY(!plain.titlePage.isEmpty());
+
+        const Layout numbered = layout(QStringLiteral("---\ntitle: X\nscene numbers: true\ncontd: yes\ntitle page: false\n---\n") + body);
+        QCOMPARE(numbered.pages.first().rows.first().sceneNumber, 1);
+        QVERIFY(numbered.titlePage.isEmpty());
+        QCOMPARE(screenplayRows(numbered.pages.first()).at(4).second, QStringLiteral("TOM (CONT'D)"));
+    }
+
+    void exportsTheScriptAsPdf() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("script.pdf"));
+        QString error;
+        Screenplay::registerFonts();
+        QVERIFY2(Screenplay::exportPdf(Screenplay::layout(QStringLiteral("---\ntitle: T\n---\n\nFADE IN:\n")),
+                                       path, &error), qPrintable(error));
+        QFile pdf(path);
+        QVERIFY(pdf.open(QIODevice::ReadOnly));
+        QVERIFY(pdf.read(5) == "%PDF-");
+
+        QVERIFY(!Screenplay::exportPdf(Screenplay::layout(QString()),
+                                       directory.filePath(QStringLiteral("missing/dir/x.pdf")), &error));
+        QVERIFY(!error.isEmpty());
+    }
+
+    void previewFollowsTheCaretAndCountsPages() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        Backend backend;
+        backend.setPreviewVisible(true);
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+        auto *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        window->resize(1280, 820);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        auto *pane = window->findChild<QQuickItem *>(QStringLiteral("screenplayPane"));
+        auto *preview = window->findChild<ScreenplayPreview *>(QStringLiteral("screenplayPreview"));
+        QVERIFY(editor && pane && preview);
+
+        QString script = QStringLiteral("---\ntitle: The Long One\nauthor: Someone\n---\n\n");
+        for (int scene = 1; scene <= 12; ++scene) {
+            script += QStringLiteral("## INT. ROOM %1 - NIGHT\n\nA lamp flickers. Someone waits by the window and listens.\n\n"
+                                     "**MARGARET**\n*(quietly)*\nDid you hear that? It came from under the floor, again.\n\n").arg(scene);
+        }
+        editor->setProperty("text", script);
+        QTRY_VERIFY(preview->pageCount() >= 2);
+        QVERIFY(pane->width() > 500);
+        QVERIFY(pane->x() >= window->width() / 2);
+
+        // The editor shares the window: its column stays in the left half.
+        auto *editorItem = qobject_cast<QQuickItem *>(editor);
+        QVERIFY(editorItem->mapToScene(QPointF(editorItem->width(), 0)).x() <= window->width() / 2);
+
+        // Writing at the end brings the last page into view.
+        QMetaObject::invokeMethod(editor, "forceActiveFocus");
+        editor->setProperty("cursorPosition", script.length());
+        const qreal lastY = preview->yForSourcePosition(script.length());
+        QVERIFY(lastY > preview->height());
+        QTRY_VERIFY(lastY >= preview->contentY() && lastY <= preview->contentY() + preview->height());
+
+        // And back to the top.
+        editor->setProperty("cursorPosition", 0);
+        QTRY_COMPARE(preview->contentY(), 0.0);
+
+        // The footer counts pages beside words.
+        QQuickItem *footer = nullptr;
+        for (QQuickItem *item : window->findChildren<QQuickItem *>()) {
+            if (item->property("text").toString().endsWith(QLatin1String(" Pages")))
+                footer = item;
+        }
+        QVERIFY(footer);
+        QCOMPARE(footer->property("text").toString().section(QStringLiteral(" \u00b7 "), 1),
+                 QStringLiteral("%1 Pages").arg(preview->pageCount()));
+
+        if (const QString shots = qEnvironmentVariable("OMASCRIPT_SCREENSHOTS"); !shots.isEmpty()) {
+            editor->setProperty("cursorPosition", script.indexOf(QLatin1String("ROOM 7")));
+            QTest::qWait(600);
+            window->grabWindow().save(shots + QStringLiteral("/split-view.png"));
+        }
+
+        // The preview can be put away, and the editor takes the window back.
+        backend.togglePreview();
+        QTRY_VERIFY(!pane->isVisible());
+        QTRY_VERIFY(editorItem->mapToScene(QPointF(editorItem->width(), 0)).x() > window->width() / 2);
+        backend.togglePreview();
+    }
+
+    void returnFollowsScreenplayFlow() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+        auto *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+        QMetaObject::invokeMethod(editor, "forceActiveFocus");
+
+        const auto pressReturnAfter = [&](const QString &text) {
+            editor->setProperty("text", text);
+            editor->setProperty("cursorPosition", text.length());
+            QTest::keyClick(window, Qt::Key_Return);
+            return editor->property("text").toString().mid(text.length());
+        };
+
+        // A name and a parenthetical lead straight into the speech.
+        QCOMPARE(pressReturnAfter(QStringLiteral("**MARGARET**")), QStringLiteral("\n"));
+        QCOMPARE(pressReturnAfter(QStringLiteral("**OLD TOM** (V.O.)")), QStringLiteral("\n"));
+        QCOMPARE(pressReturnAfter(QStringLiteral("**TOM**\n*(quietly)*")), QStringLiteral("\n"));
+        // The speech, action and transitions end their paragraph.
+        QCOMPARE(pressReturnAfter(QStringLiteral("**TOM**\nHello.")), QStringLiteral("\n\n"));
+        QCOMPARE(pressReturnAfter(QStringLiteral("> CUT TO:")), QStringLiteral("\n\n"));
+        QCOMPARE(pressReturnAfter(QStringLiteral("She waits.")), QStringLiteral("\n\n"));
+    }
+
     void answersHelpBeforeOpeningAWindow() {
         const QString usage = Cli::usage();
-        QVERIFY(usage.contains(QStringLiteral("omawrite [FILE]")));
+        QVERIFY(usage.contains(QStringLiteral("omascript [FILE]")));
         QVERIFY(usage.contains(QStringLiteral("-h, --help")));
         QVERIFY(usage.contains(QStringLiteral("-v, --version")));
 
@@ -441,6 +675,9 @@ private slots:
         QVERIFY(!mainQmlPath.isEmpty());
 
         Backend backend;
+        // This test holds the global thread pool, which the raster engine
+        // also borrows to paint the script preview, so leave the preview out.
+        backend.setPreviewVisible(false);
         QQmlEngine engine;
         engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
         QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
@@ -2640,7 +2877,7 @@ private slots:
             QVERIFY(versionLabel);
             QVERIFY(versionLabel->property("visible").toBool());
             QCOMPARE(versionLabel->property("text").toString(),
-                     QStringLiteral("Omawrite ") + QCoreApplication::applicationVersion());
+                     QStringLiteral("Omascript ") + QCoreApplication::applicationVersion());
             QTest::keyClick(window, Qt::Key_Minus, Qt::ControlModifier);
             QCOMPARE(backend.textScale(), scale);
             QVERIFY(dialog->property("x").toReal() >= 0);

@@ -5,6 +5,7 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQmlError>
+#include <QtQml/qqml.h>
 #include <QQuickStyle>
 #include <QUrl>
 #include <QWindow>
@@ -12,9 +13,11 @@
 
 #include "backend.h"
 #include "cli.h"
+#include "screenplay.h"
+#include "screenplaypreview.h"
 #include "systemtheme.h"
 
-#define OMAWRITE_VERSION "0.7.2"
+#define OMAWRITE_VERSION "0.1.0"
 
 int main(int argc, char *argv[]) {
     // Answered before the application exists, so they need no display.
@@ -30,15 +33,17 @@ int main(int argc, char *argv[]) {
         qputenv("QT_QPA_PLATFORMTHEME", "xdgdesktopportal");
 
     QApplication app(argc, argv);
-    app.setApplicationName(QStringLiteral("omawrite"));
+    app.setApplicationName(QStringLiteral("omascript"));
     app.setApplicationVersion(QStringLiteral(OMAWRITE_VERSION));
-    app.setDesktopFileName(QStringLiteral("omawrite"));
-    app.setWindowIcon(QIcon::fromTheme(QStringLiteral("omawrite")));
+    app.setDesktopFileName(QStringLiteral("omascript"));
+    app.setWindowIcon(QIcon::fromTheme(QStringLiteral("omascript")));
 
     QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/IBMPlexMono-Regular.ttf"));
     QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/IBMPlexMono-Italic.ttf"));
     QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/IBMPlexMono-Bold.ttf"));
     QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/IBMPlexMono-BoldItalic.ttf"));
+    Screenplay::registerFonts();
+    qmlRegisterType<ScreenplayPreview>("Omascript", 1, 0, "ScreenplayPreview");
     app.setOrganizationName(QStringLiteral("Omacom"));
     app.setOrganizationDomain(QStringLiteral("omacom.io"));
 
@@ -83,7 +88,7 @@ int main(int argc, char *argv[]) {
 
     engine.load(QUrl(QStringLiteral("qrc:/Main.qml")));
     if (engine.rootObjects().isEmpty()) {
-        qCritical() << "Could not load the Omawrite interface; resource available:"
+        qCritical() << "Could not load the Omascript interface; resource available:"
                     << QFile::exists(QStringLiteral(":/Main.qml"));
         return -1;
     }

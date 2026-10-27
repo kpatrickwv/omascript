@@ -1,13 +1,14 @@
-# Maintainer: David Heinemeier Hansson <david@hey.com>
+# Maintainer: Kevin Patrick Jr.
+# Based on Omawrite by David Heinemeier Hansson <david@hey.com>
 
-pkgname=omawrite
-pkgver=0.7.2
+pkgname=omascript
+pkgver=0.1.0
 pkgrel=1
-pkgdesc='Dead-simple Markdown writing app built with Qt Quick'
+pkgdesc='Screenplay writing app: Markdown on the left, formatted script on the right (a fork of Omawrite)'
 arch=('x86_64' 'aarch64')
-url='https://github.com/omacom/omawrite'
+url='https://github.com/kpatrickwv/omascript'
 license=('MIT' 'OFL-1.1')
-install='omawrite.install'
+install='omascript.install'
 depends=('qt6-base' 'qt6-declarative' 'xdg-desktop-portal')
 makedepends=('gcc' 'make' 'qt6-base' 'qt6-declarative')
 source=()
@@ -20,9 +21,10 @@ build() {
 
 package() {
   cd "$startdir/.."
-  /usr/bin/install -Dm755 build/omawrite "$pkgdir/usr/bin/omawrite"
+  /usr/bin/install -Dm755 build/omascript "$pkgdir/usr/bin/omascript"
   /usr/bin/install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   /usr/bin/install -Dm644 fonts/OFL.txt "$pkgdir/usr/share/licenses/$pkgname/OFL.txt"
-  /usr/bin/install -Dm644 "$startdir/omawrite.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/omawrite.svg"
-  /usr/bin/install -Dm644 "$startdir/omawrite.desktop" "$pkgdir/usr/share/applications/omawrite.desktop"
+  /usr/bin/install -Dm644 fonts/courier-prime/OFL.txt "$pkgdir/usr/share/licenses/$pkgname/OFL-CourierPrime.txt"
+  /usr/bin/install -Dm644 "$startdir/omascript.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/omascript.svg"
+  /usr/bin/install -Dm644 "$startdir/omascript.desktop" "$pkgdir/usr/share/applications/omascript.desktop"
 }
